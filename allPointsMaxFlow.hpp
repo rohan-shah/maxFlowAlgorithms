@@ -17,18 +17,18 @@ namespace allPointsMaxFlow
 		flowPredicate()
 			:graph(NULL), capacities(NULL), residualCapacities(NULL)
 		{}
-		flowPredicate(const inputGraph& graph, const std::vector<flowType>& capacities, const std::vector<flowType>& residualCapacities)
-			: graph(&graph), capacities(&capacities), residualCapacities(&residualCapacities)
+		flowPredicate(const inputGraph& graph, typename std::vector<flowType>::const_iterator capacities, typename std::vector<flowType>::const_iterator residualCapacities)
+			: graph(&graph), capacities(capacities), residualCapacities(residualCapacities)
 		{}
 		bool operator()(const edge_descriptor& edge) const
 		{
 			int index = boost::get(boost::edge_index, *graph, edge);
-			return (*residualCapacities)[index] > 0;// || (*residualCapacities)[reverseIndex] < (*capacities)[reverseIndex];
+			return *(residualCapacities + index) > 0;// || (*residualCapacities)[reverseIndex] < (*capacities)[reverseIndex];
 		}
 	private:
 		const inputGraph* graph;
-		const std::vector<flowType>* capacities;
-		const std::vector<flowType>* residualCapacities;
+		typename std::vector<flowType>::const_iterator capacities;
+		typename std::vector<flowType>::const_iterator residualCapacities;
 	};
 	//Working data for the all points max flow code. Includes loads of typedefs
 	template<class inputGraph, typename flowType = double> struct allPointsMaxFlowScratch
@@ -61,13 +61,13 @@ namespace allPointsMaxFlow
 	template<typename inputGraph, typename flowType = double> struct minimumEdgeWeightVisitorState
 	{
 	public:
-		minimumEdgeWeightVisitorState(std::vector<flowType>& flowMatrix)
+		minimumEdgeWeightVisitorState(typename std::vector<flowType>::iterator flowMatrix)
 			: flowMatrix(flowMatrix)
 		{}
 		typename allPointsMaxFlowScratch<inputGraph, flowType>::starGraphType::vertex_descriptor start;
 		std::vector<typename allPointsMaxFlowScratch<inputGraph, flowType>::starGraphType::edge_descriptor> edges;
 		std::vector<flowType> minimumValues;
-		std::vector<flowType>& flowMatrix;
+		typename std::vector<flowType>::iterator flowMatrix;
 		std::size_t nVertices;
 	};
 	//This visitor traverses the flow-equivalent ntree and gets out the all-points max flow. It does this by keeping track of the minimum capacity edge. 
@@ -95,7 +95,7 @@ namespace allPointsMaxFlow
 			//If we've somehow looped around and reached the starting vertex again, throw an exception. This should be impossible because the graph this visitor is applied to is a tree.
 			if(e.m_target == stateRef.start) throw std::runtime_error("");
 			//Put in the current bottleneck as the flow between the start vertex and the end-point of the current edge. 
-			stateRef.flowMatrix[e.m_target + stateRef.nVertices * stateRef.start] = stateRef.flowMatrix[stateRef.start + stateRef.nVertices * e.m_target] = stateRef.minimumValues.back();
+			*(stateRef.flowMatrix + e.m_target + stateRef.nVertices * stateRef.start) = *(stateRef.flowMatrix + stateRef.start + stateRef.nVertices * e.m_target) = stateRef.minimumValues.back();
 		}
 		void finish_edge(const typename allPointsMaxFlowScratch<inputGraph, flowType>::starGraphType::edge_descriptor e, const typename allPointsMaxFlowScratch<inputGraph, flowType>::starGraphType& star)
 		{
@@ -111,7 +111,7 @@ namespace allPointsMaxFlow
 	private:
 		minimumEdgeWeightVisitorState<inputGraph, flowType>& stateRef;
 	};
-	template<class inputGraph, typename flowType> void extractFlow(const typename allPointsMaxFlowScratch<inputGraph, flowType>::starGraphType& tree, std::vector<flowType>& flowMatrix, allPointsMaxFlowScratch<inputGraph, flowType>& scratch)
+	template<class inputGraph, typename flowType> void extractFlow(const typename allPointsMaxFlowScratch<inputGraph, flowType>::starGraphType& tree, typename std::vector<flowType>::iterator& flowMatrix, allPointsMaxFlowScratch<inputGraph, flowType>& scratch)
 	{
 		const std::size_t nVertices = boost::num_vertices(tree);
 		const std::size_t nEdges = boost::num_edges(tree);
@@ -122,7 +122,7 @@ namespace allPointsMaxFlow
 		{
 			typename allPointsMaxFlowScratch<inputGraph, flowType>::starGraphType::edge_iterator begin, end;
 			boost::tie(begin, end) = boost::edges(tree);
-			flowMatrix[0] = flowMatrix[1] = boost::get(boost::edge_weight, tree, *begin);
+			*flowMatrix = *(flowMatrix + 1) = boost::get(boost::edge_weight, tree, *begin);
 		}
 		else if (nVertices < 2)
 		{
@@ -154,8 +154,14 @@ namespace allPointsMaxFlow
 			boost::custom_undirected_dfs(tree, visitor, vertexColorMap, edgeColorMap, *current);
 		}
 	}
-	template<class inputGraph, typename flowType> void allPointsMaxFlow(std::vector<flowType>& flowMatrix, const std::vector<flowType>& capacities, const inputGraph& graph, allPointsMaxFlowScratch<inputGraph, flowType>& scratch)
+	template<class inputGraph, typename flowType> void allPointsMaxFlow(typename std::vector<flowType>::iterator flowMatrix, const typename std::vector<flowType>::const_iterator capacities, const inputGraph& graph, allPointsMaxFlowScratch<inputGraph, flowType>& scratch)
 	{
+		BOOST_STATIC_ASSERT(
+			boost::is_base_and_derived<
+				boost::directed_tag, 
+				typename boost::graph_traits<inputGraph>::directed_category
+			>::value
+		); 
 		const std::size_t nVertices = boost::num_vertices(graph);
 		const std::size_t nEdges = boost::num_edges(graph);
 		//Resize scratch data
@@ -176,14 +182,14 @@ namespace allPointsMaxFlow
 			typename allPointsMaxFlowScratch<inputGraph, flowType>::starGraphType::vertex_descriptor t = uniqueEdge.m_target;
 
 			//Call Edgmonds Karp
-			std::copy(capacities.begin(), capacities.end(), scratch.edgeResidualCapacityVector.begin());
-			std::fill(flowMatrix.begin(), flowMatrix.end(), 0);
+			std::copy(capacities, capacities + nEdges, scratch.edgeResidualCapacityVector.begin());
+			std::fill(flowMatrix, flowMatrix + nEdges, 0);
 			flowType maxFlow = 0;
-			multistateTurnip::edmondsKarpMaxFlow<inputGraph, flowType>(&capacities.front(), &flowMatrix.front(), &scratch.edgeResidualCapacityVector.front(), graph, s, t, std::numeric_limits<flowType>::max(), scratch.edmondsKarpScratch, maxFlow);
+			multistateTurnip::edmondsKarpMaxFlow<inputGraph, flowType>(&*capacities, &*flowMatrix, &scratch.edgeResidualCapacityVector.front(), graph, s, t, std::numeric_limits<flowType>::max(), scratch.edmondsKarpScratch, maxFlow);
 			boost::put(boost::edge_weight, star, uniqueEdge, maxFlow);
 
 			//get out the two components of graph which are seperated by the mincut we just found
-			typename allPointsMaxFlowScratch<inputGraph, flowType>::filteredGraph filtered(graph, flowPredicate<inputGraph, flowType>(graph, capacities, scratch.edgeResidualCapacityVector));
+			typename allPointsMaxFlowScratch<inputGraph, flowType>::filteredGraph filtered(graph, flowPredicate<inputGraph, flowType>(graph, capacities, scratch.edgeResidualCapacityVector.begin()));
 			typename allPointsMaxFlowScratch<inputGraph, flowType>::filteredVertexIndexMapType filteredVertexMap = boost::get(boost::vertex_index, filtered);
 			typename allPointsMaxFlowScratch<inputGraph, flowType>::filteredEdgeIndexMapType filteredEdgeMap = boost::get(boost::edge_index, filtered);
 			typename allPointsMaxFlowScratch<inputGraph, flowType>::filteredVertexColorMapType filteredVertexColorMap(scratch.colorVector1.begin(), filteredVertexMap);
@@ -216,8 +222,12 @@ namespace allPointsMaxFlow
 			}
 		}
 		//Extract the max flow from the flow-equivalent tree (the star graph)
-		std::fill(flowMatrix.begin(), flowMatrix.end(), std::numeric_limits<flowType>::max());
+		std::fill(flowMatrix, flowMatrix + nEdges, std::numeric_limits<flowType>::max());
 		extractFlow<inputGraph, flowType>(star, flowMatrix, scratch);
+	}
+	template<class inputGraph, typename flowType> void allPointsMaxFlow(std::vector<flowType>& flowMatrix, const std::vector<flowType>& capacities, const inputGraph& graph, allPointsMaxFlowScratch<inputGraph, flowType>& scratch)
+	{
+		allPointsMaxFlow<inputGraph, flowType>(flowMatrix.begin(), capacities.begin(), graph, scratch);
 	}
 }
 #endif
