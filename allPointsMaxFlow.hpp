@@ -15,7 +15,7 @@ namespace allPointsMaxFlow
 	public:
 		typedef typename inputGraph::edge_descriptor edge_descriptor;
 		flowPredicate()
-			:graph(NULL), capacities(NULL), residualCapacities(NULL)
+			:graph(NULL)
 		{}
 		flowPredicate(const inputGraph& graph, typename std::vector<flowType>::const_iterator capacities, typename std::vector<flowType>::const_iterator residualCapacities)
 			: graph(&graph), capacities(capacities), residualCapacities(residualCapacities)
